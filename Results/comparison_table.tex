@@ -1,0 +1,15 @@
+
+\begin{table}[ht]
+\centering
+\caption{Flood Depth Prediction Performance (5-Fold Leave-One-Out CV)}
+\begin{tabular}{ccc}
+\hline
+\textbf{Metric} & \textbf{ConvLSTM (Baseline)} & \textbf{U-Net + ConvLSTM (Proposed)} \\
+\hline
+RMSE (m) & $1130615.3934 \pm 1379017.0517$ & $459379.7054 \pm 592785.2805$ \\
+MAE (m) & $648022.2617 \pm 794817.5338$ & $360176.5117 \pm 484961.8661$ \\
+CSI & $0.6086 \pm 0.1735$ & $0.6409 \pm 0.2010$ \\
+SSIM & $-0.0000 \pm 0.0000$ & $0.4003 \pm 0.0799$ \\
+\hline
+\end{tabular}
+\end{table}

@@ -51,6 +51,12 @@ results/
 *.onnx
 *.pkl
 
+# Keep report artifacts from Results/
+!Results/
+Results/*
+!Results/*.png
+!Results/*.tex
+
 # Data and results
 data/
 *.h5
