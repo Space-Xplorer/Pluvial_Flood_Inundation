@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import h5py
@@ -22,30 +21,44 @@ def find_dataset(area, candidates):
     return None
 
 
+def get_dataset_by_path(file_handle, path_parts):
+    current = file_handle
+    for part in path_parts:
+        if part not in current:
+            return None
+        current = current[part]
+    return current if isinstance(current, h5py.Dataset) else None
+
+
 def extract(file_path, idx):
     print(f"\nProcessing: {file_path.name}")
 
     with h5py.File(file_path, "r") as f:
         try:
-            base = f["Results"]["Unsteady"]["Output"]["Output Blocks"]["Base Output"][
-                "2D Flow Areas"
-            ]
+            geometry_areas = f["Geometry"]["2D Flow Areas"]
         except KeyError as exc:
             raise KeyError(
-                f"Expected HEC-RAS path not found in {file_path.name}: {exc}"
+                f"Expected geometry path not found in {file_path.name}: {exc}"
             ) from exc
 
-        area_names = list(base.keys())
+        area_names = [
+            key
+            for key in geometry_areas.keys()
+            if isinstance(geometry_areas[key], h5py.Group)
+        ]
         if not area_names:
             raise ValueError(f"No 2D flow areas found in {file_path.name}")
 
         area_name = area_names[0]
         print(f"Area: {area_name}")
-        area = base[area_name]
+        area = geometry_areas[area_name]
         print(f"Available keys: {list(area.keys())}")
 
         depth_key = find_dataset(area, ["Depth"])
-        wse_key = find_dataset(area, ["Water Surface", "Water Surface Elevation"])
+        min_elev_key = find_dataset(
+            area,
+            ["Cells Minimum Elevation", "Cell Minimum Elevation"],
+        )
         coords_key = find_dataset(
             area,
             [
@@ -58,9 +71,8 @@ def extract(file_path, idx):
         missing = [
             name
             for name, key in {
-                "Depth": depth_key,
-                "Water Surface": wse_key,
                 "Cells Center Coordinate": coords_key,
+                "Cells Minimum Elevation": min_elev_key,
             }.items()
             if key is None
         ]
@@ -69,15 +81,44 @@ def extract(file_path, idx):
                 f"Missing required dataset(s) in {file_path.name}: {', '.join(missing)}"
             )
 
-        depth = area[depth_key][:]  # (time, cells)
-        wse = area[wse_key][:]  # (time, cells)
         coords = area[coords_key][:]  # (cells, 2)
+        min_elev = area[min_elev_key][:].astype(np.float32)  # (cells,)
+
+        if depth_key is not None:
+            depth = area[depth_key][:].astype(np.float32)  # (time, cells)
+            wse = None
+        else:
+            wse_path = get_dataset_by_path(
+                f,
+                [
+                    "Results",
+                    "Unsteady",
+                    "Output",
+                    "Output Blocks",
+                    "Base Output",
+                    "Unsteady Time Series",
+                    "2D Flow Areas",
+                    area_name,
+                    "Water Surface",
+                ],
+            )
+            if wse_path is None:
+                raise KeyError(
+                    f"Water Surface dataset not found for {file_path.name} in Results/Unsteady/Output/Output Blocks/Base Output/Unsteady Time Series/2D Flow Areas/{area_name}/Water Surface"
+                )
+            wse = wse_path[:].astype(np.float32)  # (time, cells)
+            depth = np.maximum(wse - min_elev[None, :], 0.0).astype(np.float32)
+
+        depth = np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
+        if wse is not None:
+            wse = np.nan_to_num(wse, nan=0.0, posinf=0.0, neginf=0.0)
 
     print(f"depth shape: {depth.shape}")
     print(f"coords shape: {coords.shape}")
 
     np.save(OUT_DIR / f"depth_{idx}.npy", depth)
-    np.save(OUT_DIR / f"wse_{idx}.npy", wse)
+    if wse is not None:
+        np.save(OUT_DIR / f"wse_{idx}.npy", wse)
     np.save(OUT_DIR / f"coords_{idx}.npy", coords)
 
 

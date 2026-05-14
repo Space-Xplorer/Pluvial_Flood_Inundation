@@ -38,6 +38,19 @@ wheels/
 .ipynb_checkpoints
 *.ipynb
 
+# Markdown docs
+*.md
+!README.md
+
+# Model artifacts
+checkpoints/
+results/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.pkl
+
 # Data and results
 data/
 *.h5

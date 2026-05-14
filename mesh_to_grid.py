@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import numpy as np
-from scipy.interpolate import griddata
+from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import Delaunay
 from scipy.spatial import cKDTree
 
 
@@ -33,10 +34,20 @@ def build_grid(coords, grid_size):
     return grid_x, grid_y, (x_min, x_max, y_min, y_max)
 
 
-def interpolate_frame(values, coords, grid_x, grid_y):
-    linear = griddata(coords, values, (grid_x, grid_y), method="linear")
-    nearest = griddata(coords, values, (grid_x, grid_y), method="nearest")
-    return np.where(np.isnan(linear), nearest, linear)
+def build_interpolation_cache(coords, grid_x, grid_y):
+    tri = Delaunay(coords)
+    tree = cKDTree(coords)
+    query_points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+    _, nearest_idx = tree.query(query_points, k=1)
+    return tri, nearest_idx
+
+
+def interpolate_frame(values, tri, nearest_idx, grid_shape, grid_x, grid_y):
+    values = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+    linear = LinearNDInterpolator(tri, values)(grid_x, grid_y)
+    nearest = values[nearest_idx].reshape(grid_shape)
+    frame = np.where(np.isnan(linear), nearest, linear)
+    return np.nan_to_num(frame, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def build_coverage_mask(coords, grid_x, grid_y):
@@ -63,6 +74,8 @@ def convert_one(sim_idx):
     depth = np.load(depth_path)
     coords = np.load(coords_path)
 
+    depth = np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
+
     if depth.ndim != 2:
         raise ValueError(f"depth_{sim_idx}.npy must be 2D (time, cells)")
     if coords.ndim != 2 or coords.shape[1] != 2:
@@ -72,10 +85,12 @@ def convert_one(sim_idx):
 
     t_steps = depth.shape[0]
     grid_x, grid_y, bounds = build_grid(coords, GRID_SIZE)
+    tri, nearest_idx = build_interpolation_cache(coords, grid_x, grid_y)
+    grid_shape = grid_x.shape
     depth_grid = np.zeros((t_steps, GRID_SIZE, GRID_SIZE), dtype=np.float32)
 
     for t in range(t_steps):
-        frame = interpolate_frame(depth[t], coords, grid_x, grid_y)
+        frame = interpolate_frame(depth[t], tri, nearest_idx, grid_shape, grid_x, grid_y)
         depth_grid[t] = frame.astype(np.float32)
 
     np.save(GRID_DIR / f"depth_grid_{sim_idx}.npy", depth_grid)
@@ -85,7 +100,7 @@ def convert_one(sim_idx):
         if wse.shape == depth.shape:
             wse_grid = np.zeros((t_steps, GRID_SIZE, GRID_SIZE), dtype=np.float32)
             for t in range(t_steps):
-                frame = interpolate_frame(wse[t], coords, grid_x, grid_y)
+                frame = interpolate_frame(wse[t], tri, nearest_idx, grid_shape, grid_x, grid_y)
                 wse_grid[t] = frame.astype(np.float32)
             np.save(GRID_DIR / f"wse_grid_{sim_idx}.npy", wse_grid)
 
